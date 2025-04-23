@@ -6,6 +6,28 @@ import threading
 import json
 import shutil
 import sys
+import codecs  # 添加codecs模块
+
+# 移除原有的decode_eagle_unicode函数
+# 添加新的Eagle元数据处理函数
+def fix_unicode_name(text):
+    """修复Eagle元数据中的Unicode编码问题"""
+    if not text or not isinstance(text, str):
+        return text
+        
+    # 检查是否可能是Unicode转义序列形式
+    if '\\u' in repr(text) and not '\\u' in text:
+        # 原始的JSON解析已经将Unicode转义序列转换为Unicode字符
+        return text
+    elif '\\u' in text:
+        # 如果文本中直接包含'\u'序列，尝试解码
+        try:
+            # 将原始字符串中的Unicode转义序列直接解码
+            return text.encode('utf-8').decode('unicode_escape')
+        except Exception:
+            pass
+    
+    return text
 
 class RedirectText:
     """用于将控制台输出重定向到Tkinter文本控件"""
@@ -282,41 +304,63 @@ class EagleRenamerApp:
                     metadata_file = os.path.join(folder_path, "metadata.json")
                     if os.path.exists(metadata_file):
                         try:
+                            # 直接以文本形式读取原始内容
                             with open(metadata_file, 'r', encoding='utf-8') as f:
-                                metadata = json.load(f)
-                                
-                                # 获取文件名和类型
-                                file_name = metadata.get("name", "未知")
-                                file_ext = metadata.get("ext", "").lower()
-                                
-                                # 找到对应的实际文件
-                                actual_files = [f for f in os.listdir(folder_path) 
-                                              if os.path.isfile(os.path.join(folder_path, f)) 
-                                              and not f.endswith('.json') 
-                                              and not f.endswith('.png')]
-                                
-                                actual_file = actual_files[0] if actual_files else None
-                                
-                                # 保存文件信息
-                                file_info = {
-                                    "id": file_id,
-                                    "folder": folder_path,
-                                    "metadata_file": metadata_file,
-                                    "name": file_name,
-                                    "type": file_ext,
-                                    "actual_file": actual_file,
-                                    "metadata": metadata
-                                }
-                                
-                                self.eagle_files.append(file_info)
-                                
-                                # 添加到界面
-                                self.file_tree.insert("", "end", values=(
-                                    folder_count,
-                                    file_id,
-                                    file_name,
-                                    file_ext.upper()
-                                ))
+                                raw_content = f.read()
+                            
+                            # 尝试检测文件中是否有Unicode转义序列
+                            has_unicode_escapes = '\\u' in raw_content
+                            
+                            # 解析JSON
+                            metadata = json.loads(raw_content)
+                            
+                            # 获取文件名
+                            file_name = metadata.get("name", "未知")
+                            
+                            # 如果原始文件包含Unicode转义序列并且文件名看起来不正确
+                            if has_unicode_escapes and ('\\u' in file_name or not re.search('[\u4e00-\u9fff]', file_name)):
+                                # 尝试直接从原始内容中提取name字段的值
+                                name_match = re.search(r'"name"\s*:\s*"(.*?)"', raw_content)
+                                if name_match:
+                                    # 提取匹配的name值并解码Unicode转义序列
+                                    raw_name = name_match.group(1)
+                                    try:
+                                        file_name = raw_name.encode('utf-8').decode('unicode_escape')
+                                    except Exception:
+                                        # 如果解码失败，保留原始名称
+                                        file_name = raw_name
+                            
+                            # 获取文件类型
+                            file_ext = metadata.get("ext", "").lower()
+                            
+                            # 找到对应的实际文件
+                            actual_files = [f for f in os.listdir(folder_path) 
+                                          if os.path.isfile(os.path.join(folder_path, f)) 
+                                          and not f.endswith('.json') 
+                                          and not f.endswith('.png')]
+                            
+                            actual_file = actual_files[0] if actual_files else None
+                            
+                            # 保存文件信息
+                            file_info = {
+                                "id": file_id,
+                                "folder": folder_path,
+                                "metadata_file": metadata_file,
+                                "name": file_name,
+                                "type": file_ext,
+                                "actual_file": actual_file,
+                                "metadata": metadata
+                            }
+                            
+                            self.eagle_files.append(file_info)
+                            
+                            # 添加到界面
+                            self.file_tree.insert("", "end", values=(
+                                folder_count,
+                                file_id,
+                                file_name,
+                                file_ext.upper()
+                            ))
                         except Exception as e:
                             print(f"处理文件{metadata_file}时发生错误: {str(e)}")
             
@@ -712,7 +756,7 @@ class EagleRenamerApp:
                             
                             # 写入新内容
                             with open(metadata_file, 'w', encoding='utf-8') as f:
-                                json.dump(metadata, f)
+                                json.dump(metadata, f, ensure_ascii=False)
                         
                         # 2. 如果有实际文件，重命名实际文件
                         if actual_file and os.path.exists(os.path.join(folder_path, actual_file)):
