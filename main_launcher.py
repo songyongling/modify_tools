@@ -4,6 +4,8 @@ import tkinter as tk
 from tkinter import ttk, messagebox
 import importlib.util
 import subprocess
+# 导入Eagle文件重命名工具类
+from eagle_rename_gui import EagleRenamerApp
 
 class LauncherApp:
     def __init__(self, root):
@@ -114,44 +116,25 @@ class LauncherApp:
         self.root.deiconify()
     
     def launch_eagle_rename(self):
-        """启动Eagle重命名工具"""
-        # 获取当前执行文件的路径
+        """启动Eagle重命名工具 - 使用直接调用的方式"""
         try:
-            if getattr(sys, 'frozen', False):
-                # 如果是打包后的环境
-                application_path = os.path.dirname(sys.executable)
-                module_path = os.path.join(application_path, "eagle_rename_gui_app.exe")
-                if not os.path.exists(module_path):
-                    # 查找同级目录下的可执行文件
-                    parent_dir = os.path.dirname(application_path)
-                    module_path = os.path.join(parent_dir, "eagle_rename_gui_app.exe")
-                    if not os.path.exists(module_path):
-                        # 尝试在其他可能的位置查找
-                        module_path = os.path.join(os.path.dirname(parent_dir), "eagle_rename_gui_app.exe")
-                        if not os.path.exists(module_path):
-                            # 最后尝试在当前目录查找
-                            module_path = "eagle_rename_gui.py"
-            else:
-                # 开发环境
-                module_path = "eagle_rename_gui.py"
+            # 隐藏主窗口
+            self.root.withdraw()
             
-            print(f"尝试启动: {module_path}")
+            # 创建Eagle文件重命名应用
+            eagle_app = EagleRenamerApp()
             
-            self.root.withdraw()  # 隐藏主窗口
-            
-            if os.path.exists(module_path):
-                if module_path.endswith('.exe'):
-                    # 启动可执行文件
-                    subprocess.Popen([module_path])
-                else:
-                    # 启动Python脚本
-                    subprocess.Popen([sys.executable, module_path])
-                
-                # 稍后恢复主窗口可见
-                self.root.after(500, self.check_subprocess_and_return)
-            else:
-                messagebox.showerror("错误", f"找不到Eagle文件重命名工具！\n{module_path}")
+            # 当Eagle应用关闭时，重新显示主窗口
+            def on_eagle_close():
+                eagle_app.root.destroy()
                 self.root.deiconify()
+            
+            # 设置关闭事件处理
+            eagle_app.root.protocol("WM_DELETE_WINDOW", on_eagle_close)
+            
+            # 阻止此函数返回，直到Eagle应用关闭
+            eagle_app.root.mainloop()
+            
         except Exception as e:
             self.root.deiconify()  # 确保主窗口重新显示
             messagebox.showerror("错误", f"启动Eagle文件重命名工具失败：\n{str(e)}")

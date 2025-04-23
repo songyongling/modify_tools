@@ -1,67 +1,89 @@
+"""
+打包脚本 - 用于构建可执行文件
+"""
 import os
-import shutil
 import sys
+import shutil
+import subprocess
+import time
 
-def copy_file(src, dst):
-    """复制文件，并创建目标目录（如果不存在）"""
-    os.makedirs(os.path.dirname(dst), exist_ok=True)
-    shutil.copy2(src, dst)
-    print(f"复制: {src} -> {dst}")
+def clean_previous_build():
+    """清理之前的构建文件"""
+    print("正在清理之前的构建文件...")
+    
+    # 删除dist和build目录
+    for directory in ["dist", "build", "__pycache__"]:
+        if os.path.exists(directory):
+            try:
+                shutil.rmtree(directory)
+                print(f"已删除 {directory} 目录")
+            except PermissionError as e:
+                print(f"警告: 无法完全删除 {directory} 目录")
+                print(f"原因: {str(e)}")
+                print("这可能是因为某些文件正在被使用。程序将继续执行，但可能会重用一些旧文件。")
+    
+    print("清理完成!")
+
+def build_executable():
+    """使用PyInstaller构建可执行文件"""
+    print("正在构建可执行文件...")
+    
+    # 使用现有的spec文件构建
+    result = subprocess.run(["pyinstaller", "文件重命名工具.spec"], capture_output=True, text=True)
+    
+    if result.returncode != 0:
+        print("构建失败!")
+        print("错误信息:")
+        print(result.stderr)
+        return False
+    
+    print("构建成功!")
+    return True
+
+def create_release_zip():
+    """创建发布的ZIP文件"""
+    print("正在创建发布包...")
+    
+    # 创建release目录
+    if not os.path.exists("release"):
+        os.makedirs("release")
+    
+    # 准备发布的时间戳
+    timestamp = time.strftime("%Y%m%d%H%M%S", time.localtime())
+    
+    # 创建ZIP文件
+    zip_filename = f"release/文件重命名工具_v1.0_{timestamp}.zip"
+    
+    # 压缩dist目录中的文件
+    dist_path = os.path.join("dist", "文件重命名工具")
+    if os.path.exists(dist_path):
+        shutil.make_archive(zip_filename[:-4], 'zip', "dist", "文件重命名工具")
+        print(f"发布包已创建: {zip_filename}")
+        return True
+    else:
+        print("错误: 找不到构建的可执行文件目录")
+        return False
 
 def main():
-    # 设置路径
-    dist_dir = "dist"
-    release_dir = os.path.join(dist_dir, "文件重命名工具集")
+    """主入口函数"""
+    print("===== 文件重命名工具打包脚本 =====")
     
-    # 确保发布目录存在
-    os.makedirs(release_dir, exist_ok=True)
-    
-    # 复制主程序
-    launcher_exe = os.path.join(dist_dir, "文件重命名工具_v2", "文件重命名工具_v2.exe")
-    if os.path.exists(launcher_exe):
-        copy_file(launcher_exe, os.path.join(release_dir, "文件重命名工具.exe"))
-    else:
-        print(f"错误: 找不到主程序 '{launcher_exe}'")
+    # 检查PyInstaller是否安装
+    try:
+        subprocess.run(["pyinstaller", "--version"], check=True, capture_output=True)
+    except (subprocess.SubprocessError, FileNotFoundError):
+        print("错误: 找不到PyInstaller。请先安装PyInstaller: pip install pyinstaller")
         return
     
-    # 复制内部模块文件夹
-    internal_dir = os.path.join(dist_dir, "文件重命名工具_v2", "_internal")
-    if os.path.exists(internal_dir):
-        for item in os.listdir(internal_dir):
-            src = os.path.join(internal_dir, item)
-            dst = os.path.join(release_dir, "_internal", item)
-            if os.path.isdir(src):
-                shutil.copytree(src, dst, dirs_exist_ok=True)
-                print(f"复制目录: {src} -> {dst}")
-            else:
-                copy_file(src, dst)
-    else:
-        print(f"错误: 找不到内部模块文件夹 '{internal_dir}'")
-        return
+    # 清理之前的构建
+    clean_previous_build()
     
-    # 复制子模块可执行文件
-    folder_rename_exe = os.path.join(dist_dir, "folder_rename_gui_app.exe")
-    eagle_rename_exe = os.path.join(dist_dir, "eagle_rename_gui_app.exe")
+    # 构建可执行文件
+    if build_executable():
+        # 创建发布包
+        create_release_zip()
     
-    if os.path.exists(folder_rename_exe):
-        copy_file(folder_rename_exe, os.path.join(release_dir, "folder_rename_gui_app.exe"))
-    else:
-        print(f"警告: 找不到文件夹重命名工具 '{folder_rename_exe}'")
-    
-    if os.path.exists(eagle_rename_exe):
-        copy_file(eagle_rename_exe, os.path.join(release_dir, "eagle_rename_gui_app.exe"))
-    else:
-        print(f"警告: 找不到Eagle重命名工具 '{eagle_rename_exe}'")
-    
-    # 复制图标文件
-    icon_file = "icon.ico"
-    if os.path.exists(icon_file):
-        copy_file(icon_file, os.path.join(release_dir, "icon.ico"))
-    else:
-        print(f"警告: 找不到图标文件 '{icon_file}'")
-    
-    print(f"\n发布包已准备完成，位于: {release_dir}")
-    print("请将此文件夹压缩后分发给用户。")
+    print("===== 打包流程完成 =====")
 
 if __name__ == "__main__":
     main() 

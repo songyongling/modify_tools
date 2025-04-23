@@ -55,6 +55,10 @@ class EagleRenamerApp:
         self.start_index = tk.IntVar(value=1)
         self.prefix_mode = tk.StringVar(value="increment")
         
+        # 排序相关变量
+        self.sort_column = "序号"  # 默认排序列
+        self.sort_reverse = False  # 默认不逆序
+        
         # 创建界面
         self.create_widgets()
         
@@ -97,6 +101,10 @@ class EagleRenamerApp:
         load_btn = ttk.Button(buttons_frame, text="加载Eagle文件", command=self.load_eagle_files)
         load_btn.pack(side=tk.LEFT, padx=(0, 5))
         
+        # 添加排序按钮
+        sort_btn = ttk.Button(buttons_frame, text="按文件名排序", command=lambda: self.sort_tree_column("文件名"))
+        sort_btn.pack(side=tk.LEFT, padx=(0, 5))
+        
         # 创建中间部分 - 左侧文件列表、右侧选项
         middle_frame = ttk.Frame(main_frame)
         middle_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
@@ -110,10 +118,10 @@ class EagleRenamerApp:
         self.file_tree = ttk.Treeview(files_frame, columns=columns, show="headings", selectmode="extended")
         
         # 定义列
-        self.file_tree.heading("序号", text="序号")
-        self.file_tree.heading("文件ID", text="文件ID")
-        self.file_tree.heading("文件名", text="文件名")
-        self.file_tree.heading("类型", text="类型")
+        self.file_tree.heading("序号", text="序号", command=lambda: self.sort_tree_column("序号"))
+        self.file_tree.heading("文件ID", text="文件ID", command=lambda: self.sort_tree_column("文件ID"))
+        self.file_tree.heading("文件名", text="文件名", command=lambda: self.sort_tree_column("文件名"))
+        self.file_tree.heading("类型", text="类型", command=lambda: self.sort_tree_column("类型"))
         
         self.file_tree.column("序号", width=50, anchor="center")
         self.file_tree.column("文件ID", width=150)
@@ -135,51 +143,55 @@ class EagleRenamerApp:
         options_frame.pack(side=tk.RIGHT, fill=tk.Y, padx=(5, 0))
         options_frame.pack_propagate(False)  # 防止框架被内容压缩
         
-        # 选择和操作按钮
-        select_frame = ttk.Frame(options_frame)
-        select_frame.pack(fill=tk.X, pady=10)
-        
-        select_all_btn = ttk.Button(select_frame, text="全选", command=self.select_all)
-        select_all_btn.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=2)
-        
-        deselect_all_btn = ttk.Button(select_frame, text="取消全选", command=self.deselect_all)
-        deselect_all_btn.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=2)
-        
-        invert_btn = ttk.Button(select_frame, text="反选", command=self.invert_selection)
-        invert_btn.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=2)
-        
-        # 起始索引设置
-        index_frame = ttk.Frame(options_frame)
+        # 重命名选项框架
+        index_frame = ttk.LabelFrame(options_frame, text="重命名选项", padding="10")
         index_frame.pack(fill=tk.X, pady=10)
         
-        ttk.Label(index_frame, text="起始索引:").pack(side=tk.LEFT)
+        # 起始索引设置
+        index_row = ttk.Frame(index_frame)
+        index_row.pack(fill=tk.X, pady=(0, 5))
         
+        ttk.Label(index_row, text="起始索引:").pack(side=tk.LEFT, padx=(0, 5))
+        
+        self.start_index = tk.IntVar(value=1)
         index_spinbox = ttk.Spinbox(
-            index_frame, 
-            from_=1, 
+            index_row, 
+            from_=0, 
             to=99, 
             textvariable=self.start_index, 
-            width=5
+            width=5,
+            format="%02.0f"  # 格式化为两位数
         )
-        index_spinbox.pack(side=tk.LEFT, padx=(5, 0))
+        index_spinbox.pack(side=tk.LEFT, padx=(0, 5))
+        
+        # 添加自动选择按钮
+        auto_select_btn = ttk.Button(
+            index_row, 
+            text="自动选择", 
+            command=self.auto_select_from_index
+        )
+        auto_select_btn.pack(side=tk.LEFT, padx=(5, 0))
         
         # 前缀模式选择
-        mode_frame = ttk.LabelFrame(options_frame, text="前缀变化方式", padding="10")
-        mode_frame.pack(fill=tk.X, pady=10)
+        mode_row = ttk.Frame(index_frame)
+        mode_row.pack(fill=tk.X, pady=5)
         
+        ttk.Label(mode_row, text="前缀变化方式:").pack(side=tk.LEFT, padx=(0, 5))
+        
+        self.prefix_mode = tk.StringVar(value="increment")
         ttk.Radiobutton(
-            mode_frame, 
+            mode_row, 
             text="递增", 
             value="increment", 
             variable=self.prefix_mode
-        ).pack(anchor=tk.W, pady=2)
+        ).pack(side=tk.LEFT, padx=(0, 10))
         
         ttk.Radiobutton(
-            mode_frame, 
+            mode_row, 
             text="递减", 
             value="decrement", 
             variable=self.prefix_mode
-        ).pack(anchor=tk.W, pady=2)
+        ).pack(side=tk.LEFT)
         
         # 预览和执行按钮
         preview_btn = ttk.Button(options_frame, text="预览重命名", command=self.preview_rename)
@@ -316,6 +328,73 @@ class EagleRenamerApp:
         except Exception as e:
             messagebox.showerror("错误", f"扫描Eagle文件夹时发生错误: {str(e)}")
     
+    def sort_tree_column(self, column):
+        """对树形控件的指定列进行排序"""
+        if self.eagle_files:
+            # 如果点击的是当前排序列，则切换排序方向
+            if self.sort_column == column:
+                self.sort_reverse = not self.sort_reverse
+            else:
+                self.sort_reverse = False
+                self.sort_column = column
+            
+            # 获取所有项目
+            items = self.file_tree.get_children("")
+            
+            # 保存当前选择
+            selected_ids = [self.file_tree.item(item_id, 'values')[1] for item_id in self.file_tree.selection()]
+            
+            # 清空树形控件
+            self.file_tree.delete(*items)
+            
+            # 获取排序索引
+            column_index = {"序号": 0, "文件ID": 1, "文件名": 2, "类型": 3}[column]
+            
+            # 排序Eagle文件列表
+            if column == "序号":
+                # 序号是数字，需要转换
+                sorted_files = sorted(
+                    self.eagle_files,
+                    key=lambda x: int(self.file_tree.set(x, column_index)) if x.get(column_index, "").isdigit() else 0,
+                    reverse=self.sort_reverse
+                )
+            elif column == "文件名":
+                # 按文件名排序
+                sorted_files = sorted(
+                    self.eagle_files, 
+                    key=lambda x: x["name"].lower(),
+                    reverse=self.sort_reverse
+                )
+            else:
+                # 其他列使用普通字符串排序
+                sorted_files = sorted(
+                    self.eagle_files,
+                    key=lambda x: str(x.get(column.lower(), "")),
+                    reverse=self.sort_reverse
+                )
+            
+            # 更新Eagle文件列表
+            self.eagle_files = sorted_files
+            
+            # 重新填充树形控件
+            for i, file_info in enumerate(sorted_files):
+                self.file_tree.insert("", "end", values=(
+                    i+1,  # 重新编号
+                    file_info["id"],
+                    file_info["name"],
+                    file_info["type"].upper()
+                ))
+            
+            # 恢复选择
+            for item_id in self.file_tree.get_children(""):
+                if self.file_tree.item(item_id, 'values')[1] in selected_ids:
+                    self.file_tree.selection_add(item_id)
+            
+            # 更新选择状态
+            self.on_file_select(None)
+            
+            print(f"已按{column}{'降序' if self.sort_reverse else '升序'}排序")
+    
     def on_file_select(self, event):
         """处理文件选择事件"""
         self.selected_files = []
@@ -326,39 +405,66 @@ class EagleRenamerApp:
         
         print(f"已选择 {len(self.selected_files)} 个文件")
     
-    def select_all(self):
-        """选择所有文件"""
-        self.file_tree.selection_set(self.file_tree.get_children())
-        self.on_file_select(None)
-    
-    def deselect_all(self):
-        """取消选择所有文件"""
-        self.file_tree.selection_remove(self.file_tree.get_children())
+    def auto_select_from_index(self):
+        """根据起始索引自动选择文件"""
+        if not self.eagle_files:
+            messagebox.showwarning("警告", "请先加载Eagle文件!")
+            return
+        
+        # 获取起始索引值
+        start_prefix = self.start_index.get()
+        
+        # 清除当前选择
         self.selected_files = []
-        print("已取消所有选择")
-    
-    def invert_selection(self):
-        """反选"""
-        all_items = self.file_tree.get_children()
-        selected_items = self.file_tree.selection()
         
-        # 取消当前选择
-        self.file_tree.selection_remove(selected_items)
+        # 查找匹配的文件并选择
+        start_prefix_str = f"{start_prefix:02d}"
+        print(f"查找前缀为 {start_prefix_str} 的文件...")
         
-        # 选择未选择的项目
-        for item in all_items:
-            if item not in selected_items:
+        found = False
+        first_matching_item = None
+        
+        # 首先找到第一个匹配的文件
+        for i, item_id in enumerate(self.file_tree.get_children()):
+            item_values = self.file_tree.item(item_id, 'values')
+            file_name = item_values[2]  # 文件名在第3列
+            
+            if file_name.startswith(start_prefix_str):
+                first_matching_item = item_id
+                found = True
+                break
+        
+        # 如果找到了匹配的文件，选择从该文件到最后的所有文件
+        if found and first_matching_item:
+            items = self.file_tree.get_children()
+            start_index = items.index(first_matching_item)
+            
+            for item in items[start_index:]:
                 self.file_tree.selection_add(item)
-        
-        self.on_file_select(None)
+            
+            # 更新选择状态
+            self.on_file_select(None)
+            
+            # 自动滚动到第一个选中的项目
+            self.file_tree.see(first_matching_item)
+            
+            print(f"已自动选择 {len(self.selected_files)} 个文件，从前缀 {start_prefix_str} 开始")
+        else:
+            messagebox.showinfo("提示", f"未找到前缀为 {start_prefix_str} 的文件")
     
     def preview_rename(self):
         """预览重命名结果"""
+        # 如果没有选择文件，自动尝试基于起始索引选择
+        if not self.selected_files:
+            self.auto_select_from_index()
+        
+        # 再次检查是否有选中的文件
         if not self.selected_files:
             messagebox.showwarning("警告", "请先选择要重命名的文件!")
             return
         
-        start_idx = self.start_index.get()
+        # 获取起始索引值
+        start_prefix = self.start_index.get()
         mode = self.prefix_mode.get()
         
         # 创建预览窗口
@@ -389,39 +495,74 @@ class EagleRenamerApp:
         preview_scroll.pack(side=tk.RIGHT, fill=tk.Y)
         preview_tree.pack(fill=tk.BOTH, expand=True)
         
+        # 检查是否有文件可以重命名
+        if not self.selected_files:
+            messagebox.showwarning("警告", "没有文件可以重命名。")
+            return
+        
+        # 计算新前缀 - 修复递增逻辑
+        if mode == "increment":
+            # 递增模式：使用起始索引值+1
+            current_prefix = min(99, start_prefix + 1)  # 限制最大为99
+            change_text = "递增为"
+        else:
+            # 递减模式：使用起始索引值-1
+            current_prefix = max(1, start_prefix - 1)  # 最小为01
+            change_text = "递减为"
+        
+        print(f"\n预览重命名结果，起始索引 {start_prefix:02d} {change_text} {current_prefix:02d}")
+        
         # 生成预览数据
         original_names = []
         new_names = []
+        
+        # 提取文件组并进行重命名
+        last_group = None
         
         for i, file_info in enumerate(self.selected_files):
             original_name = file_info["name"]
             original_names.append(original_name)
             
-            # 提取前缀和后缀
-            match = re.match(r'^(\d+)(.+?)(\d+)$', original_name)
+            # 提取文件组名
+            match_group = re.match(r'^(\d+)([^0-9]+)', original_name)
+            file_group = match_group.group(2) if match_group else None
+            
+            if not file_group:
+                print(f"跳过 {original_name}（无法识别文件组）")
+                new_names.append(original_name)  # 保持原名
+                preview_tree.insert("", "end", values=(i+1, original_name, original_name))
+                continue
+            
+            # 如果是新的文件组，根据递增/递减选项调整前缀数字
+            if last_group is not None and file_group != last_group:
+                # 无论递增或递减模式，新组前缀都递增
+                current_prefix = min(99, current_prefix + 1)  # 限制最大为99
+                print(f"\n检测到新文件组 '{file_group}'，前缀递增至 {current_prefix:02d}")
+            
+            last_group = file_group
+            
+            # 提取当前文件名的数字前缀和剩余部分
+            match = re.match(r'^(\d+)(.*?)$', original_name)
             if match:
-                prefix, main_part, suffix = match.groups()
+                prefix, rest = match.groups()
                 
-                # 根据模式递增或递减前缀
-                if mode == "increment":
-                    new_prefix = str(min(99, start_idx + i)).zfill(len(prefix))
-                else:  # decrement
-                    new_prefix = str(max(1, start_idx - i)).zfill(len(prefix))
+                # 创建新文件名（保持原有前缀的位数）
+                new_name = f"{current_prefix:0{len(prefix)}d}{rest}"
+                new_names.append(new_name)
                 
-                new_name = f"{new_prefix}{main_part}{suffix}"
+                # 添加到预览表格，高亮显示变化
+                item = preview_tree.insert("", "end", values=(i+1, original_name, new_name))
+                
+                # 如果前缀变化了，设置不同的颜色
+                if prefix != f"{current_prefix:0{len(prefix)}d}":
+                    preview_tree.item(item, tags=("changed",))
             else:
-                # 如果不符合预期格式，则添加新前缀
-                if mode == "increment":
-                    new_prefix = str(min(99, start_idx + i)).zfill(2)
-                else:  # decrement
-                    new_prefix = str(max(1, start_idx - i)).zfill(2)
-                
-                new_name = f"{new_prefix}_{original_name}"
-            
-            new_names.append(new_name)
-            
-            # 添加到预览表格
-            preview_tree.insert("", "end", values=(i+1, original_name, new_name))
+                # 如果不符合预期格式，保持原名
+                new_names.append(original_name)
+                preview_tree.insert("", "end", values=(i+1, original_name, original_name))
+        
+        # 添加颜色标记
+        preview_tree.tag_configure("changed", background="#FFEEEE")
         
         # 添加按钮
         button_frame = ttk.Frame(preview_window, padding="10")
@@ -439,6 +580,11 @@ class EagleRenamerApp:
     
     def execute_rename(self):
         """执行重命名"""
+        # 如果没有选择文件，自动尝试基于起始索引选择
+        if not self.selected_files:
+            self.auto_select_from_index()
+        
+        # 再次检查是否有选中的文件
         if not self.selected_files:
             messagebox.showwarning("警告", "请先选择要重命名的文件!")
             return
@@ -447,39 +593,66 @@ class EagleRenamerApp:
         if not messagebox.askyesno("确认", "确定要执行重命名操作吗？此操作不可撤销！"):
             return
             
-        start_idx = self.start_index.get()
+        # 获取起始索引值
+        start_prefix = self.start_index.get()
         mode = self.prefix_mode.get()
         
         # 生成重命名数据
         original_names = []
         new_names = []
         
+        # 检查是否有文件可以重命名
+        if not self.selected_files:
+            messagebox.showwarning("警告", "没有文件可以重命名。")
+            return
+        
+        # 计算新前缀 - 修复递增逻辑
+        if mode == "increment":
+            # 递增模式：使用起始索引值+1
+            current_prefix = min(99, start_prefix + 1)  # 限制最大为99
+            change_text = "递增为"
+        else:
+            # 递减模式：使用起始索引值-1
+            current_prefix = max(1, start_prefix - 1)  # 最小为01
+            change_text = "递减为"
+        
+        print(f"\n执行重命名，起始索引 {start_prefix:02d} {change_text} {current_prefix:02d}")
+        
+        # 提取文件组并进行重命名
+        last_group = None
+        
         for i, file_info in enumerate(self.selected_files):
             original_name = file_info["name"]
             original_names.append(original_name)
             
-            # 提取前缀和后缀
-            match = re.match(r'^(\d+)(.+?)(\d+)$', original_name)
-            if match:
-                prefix, main_part, suffix = match.groups()
-                
-                # 根据模式递增或递减前缀
-                if mode == "increment":
-                    new_prefix = str(min(99, start_idx + i)).zfill(len(prefix))
-                else:  # decrement
-                    new_prefix = str(max(1, start_idx - i)).zfill(len(prefix))
-                
-                new_name = f"{new_prefix}{main_part}{suffix}"
-            else:
-                # 如果不符合预期格式，则添加新前缀
-                if mode == "increment":
-                    new_prefix = str(min(99, start_idx + i)).zfill(2)
-                else:  # decrement
-                    new_prefix = str(max(1, start_idx - i)).zfill(2)
-                
-                new_name = f"{new_prefix}_{original_name}"
+            # 提取文件组名
+            match_group = re.match(r'^(\d+)([^0-9]+)', original_name)
+            file_group = match_group.group(2) if match_group else None
             
-            new_names.append(new_name)
+            if not file_group:
+                print(f"跳过 {original_name}（无法识别文件组）")
+                new_names.append(original_name)  # 保持原名
+                continue
+            
+            # 如果是新的文件组，根据递增/递减选项调整前缀数字
+            if last_group is not None and file_group != last_group:
+                # 无论递增或递减模式，新组前缀都递增
+                current_prefix = min(99, current_prefix + 1)  # 限制最大为99
+                print(f"\n检测到新文件组 '{file_group}'，前缀递增至 {current_prefix:02d}")
+            
+            last_group = file_group
+            
+            # 提取当前文件名的数字前缀和剩余部分
+            match = re.match(r'^(\d+)(.*?)$', original_name)
+            if match:
+                prefix, rest = match.groups()
+                
+                # 创建新文件名（保持原有前缀的位数）
+                new_name = f"{current_prefix:0{len(prefix)}d}{rest}"
+                new_names.append(new_name)
+            else:
+                # 如果不符合预期格式，保持原名
+                new_names.append(original_name)
         
         # 执行重命名
         self.execute_rename_with_data(original_names, new_names)
