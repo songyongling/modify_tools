@@ -5,34 +5,41 @@ from tkinter import ttk, filedialog, messagebox
 import threading
 import json
 import shutil
+import sys
 
 class RedirectText:
-    """将输出重定向到Tkinter文本小部件"""
+    """用于将控制台输出重定向到Tkinter文本控件"""
     def __init__(self, text_widget):
         self.text_widget = text_widget
         self.buffer = ""
-
+        
     def write(self, string):
         self.buffer += string
-        self.text_widget.configure(state="normal")
-        self.text_widget.insert(tk.END, string)
-        self.text_widget.see(tk.END)
-        self.text_widget.configure(state="disabled")
+        self.update_text_widget()
     
     def flush(self):
+        self.update_text_widget()
+        self.buffer = ""
+    
+    def update_text_widget(self):
+        self.text_widget.configure(state=tk.NORMAL)
+        self.text_widget.insert(tk.END, self.buffer)
+        self.text_widget.see(tk.END)
+        self.text_widget.configure(state=tk.DISABLED)
         self.buffer = ""
 
 class EagleRenamerApp:
     def __init__(self, root=None):
         if root is None:
             self.root = tk.Tk()
-            self.root.title("Eagle文件重命名工具")
-            self.root.geometry("900x600")
             self.should_destroy_root = True
         else:
             self.root = root
-            self.root.title("Eagle文件重命名工具")
             self.should_destroy_root = False
+            
+        self.root.title("Eagle文件重命名")
+        self.root.geometry("900x700")
+        self.root.minsize(900, 700)
         
         # 设置窗口图标
         try:
@@ -42,374 +49,569 @@ class EagleRenamerApp:
             pass
         
         # 初始化变量
-        self.eagle_folder = tk.StringVar()
-        self.output_folder = tk.StringVar()
-        self.prefix_format = tk.StringVar(value="{:02d}")
+        self.eagle_folder = None
+        self.eagle_files = []  # 存储Eagle文件信息
+        self.selected_files = []  # 存储选中的文件
         self.start_index = tk.IntVar(value=1)
-        self.folders_data = []
-        self.selected_folders = []
+        self.prefix_mode = tk.StringVar(value="increment")
         
-        # 创建GUI界面
+        # 创建界面
         self.create_widgets()
-    
+        
     def create_widgets(self):
-        """创建GUI组件"""
-        # 主框架
+        # 创建主框架
         main_frame = ttk.Frame(self.root, padding="10")
         main_frame.pack(fill=tk.BOTH, expand=True)
         
-        # 上方区域 - Eagle文件夹选择
-        folder_frame = ttk.LabelFrame(main_frame, text="Eagle数据选择", padding="10")
-        folder_frame.pack(fill=tk.X, padx=5, pady=5)
+        # 创建顶部框架 - 文件夹路径输入
+        path_frame = ttk.LabelFrame(main_frame, text="Eagle文件夹路径", padding="10")
+        path_frame.pack(fill=tk.X, padx=5, pady=5)
         
-        ttk.Label(folder_frame, text="Eagle数据文件夹:").grid(row=0, column=0, sticky=tk.W, padx=5, pady=5)
-        ttk.Entry(folder_frame, textvariable=self.eagle_folder, width=60).grid(row=0, column=1, sticky=tk.EW, padx=5, pady=5)
-        ttk.Button(folder_frame, text="浏览", command=self.browse_eagle_folder).grid(row=0, column=2, padx=5, pady=5)
+        # 文件夹路径输入框和浏览按钮
+        path_input_frame = ttk.Frame(path_frame)
+        path_input_frame.pack(fill=tk.X, padx=5, pady=5)
         
-        ttk.Label(folder_frame, text="输出文件夹:").grid(row=1, column=0, sticky=tk.W, padx=5, pady=5)
-        ttk.Entry(folder_frame, textvariable=self.output_folder, width=60).grid(row=1, column=1, sticky=tk.EW, padx=5, pady=5)
-        ttk.Button(folder_frame, text="浏览", command=self.browse_output_folder).grid(row=1, column=2, padx=5, pady=5)
+        ttk.Label(path_input_frame, text="Eagle文件夹:").pack(side=tk.LEFT, padx=(0, 5))
         
-        ttk.Button(folder_frame, text="加载Eagle数据", command=self.load_eagle_data).grid(row=2, column=0, columnspan=3, padx=5, pady=5, sticky=tk.EW)
+        self.eagle_path_var = tk.StringVar()
+        self.eagle_path_entry = ttk.Entry(path_input_frame, textvariable=self.eagle_path_var, width=60)
+        self.eagle_path_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 5))
         
-        # 中间区域 - 文件夹列表和选项
+        browse_btn = ttk.Button(path_input_frame, text="浏览...", command=self.browse_eagle_folder)
+        browse_btn.pack(side=tk.LEFT)
+        
+        # 描述标签
+        description_frame = ttk.Frame(path_frame)
+        description_frame.pack(fill=tk.X, padx=5, pady=5)
+        
+        ttk.Label(
+            description_frame, 
+            text="请选择Eagle软件的数据文件夹，通常位于'文档/Eagle/Library'目录下。", 
+            wraplength=800
+        ).pack(fill=tk.X)
+        
+        # 功能按钮框架
+        buttons_frame = ttk.Frame(path_frame)
+        buttons_frame.pack(fill=tk.X, padx=5, pady=5)
+        
+        load_btn = ttk.Button(buttons_frame, text="加载Eagle文件", command=self.load_eagle_files)
+        load_btn.pack(side=tk.LEFT, padx=(0, 5))
+        
+        # 创建中间部分 - 左侧文件列表、右侧选项
         middle_frame = ttk.Frame(main_frame)
         middle_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
         
-        # 文件夹列表框架
-        folder_list_frame = ttk.LabelFrame(middle_frame, text="Eagle文件夹列表", padding="10")
-        folder_list_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=5, pady=5)
+        # 左侧 - 文件列表
+        files_frame = ttk.LabelFrame(middle_frame, text="Eagle文件列表", padding="10")
+        files_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 5))
         
-        # 创建文件夹列表
-        folder_scroll = ttk.Scrollbar(folder_list_frame)
-        folder_scroll.pack(side=tk.RIGHT, fill=tk.Y)
+        # 创建表格
+        columns = ("序号", "文件ID", "文件名", "类型")
+        self.file_tree = ttk.Treeview(files_frame, columns=columns, show="headings", selectmode="extended")
         
-        self.folder_listbox = tk.Listbox(
-            folder_list_frame,
-            selectmode=tk.EXTENDED,
-            yscrollcommand=folder_scroll.set,
-            font=("Courier New", 10)
-        )
-        self.folder_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        folder_scroll.config(command=self.folder_listbox.yview)
+        # 定义列
+        self.file_tree.heading("序号", text="序号")
+        self.file_tree.heading("文件ID", text="文件ID")
+        self.file_tree.heading("文件名", text="文件名")
+        self.file_tree.heading("类型", text="类型")
         
-        self.folder_listbox.bind('<<ListboxSelect>>', self.on_folder_select)
+        self.file_tree.column("序号", width=50, anchor="center")
+        self.file_tree.column("文件ID", width=150)
+        self.file_tree.column("文件名", width=400)
+        self.file_tree.column("类型", width=80, anchor="center")
         
-        # 重命名选项框架
+        # 添加滚动条
+        tree_scroll = ttk.Scrollbar(files_frame, orient="vertical", command=self.file_tree.yview)
+        self.file_tree.configure(yscrollcommand=tree_scroll.set)
+        
+        tree_scroll.pack(side=tk.RIGHT, fill=tk.Y)
+        self.file_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        
+        # 绑定选择事件
+        self.file_tree.bind("<<TreeviewSelect>>", self.on_file_select)
+        
+        # 右侧 - 操作选项
         options_frame = ttk.LabelFrame(middle_frame, text="重命名选项", padding="10", width=300)
-        options_frame.pack(side=tk.RIGHT, fill=tk.BOTH, padx=5, pady=5)
+        options_frame.pack(side=tk.RIGHT, fill=tk.Y, padx=(5, 0))
+        options_frame.pack_propagate(False)  # 防止框架被内容压缩
         
-        # 前缀格式
-        ttk.Label(options_frame, text="前缀格式:").grid(row=0, column=0, sticky=tk.W, padx=5, pady=5)
-        ttk.Entry(options_frame, textvariable=self.prefix_format, width=10).grid(row=0, column=1, sticky=tk.W, padx=5, pady=5)
-        ttk.Label(options_frame, text="例如: {:02d}").grid(row=0, column=2, sticky=tk.W, padx=5, pady=5)
-        
-        # 起始索引
-        ttk.Label(options_frame, text="起始索引:").grid(row=1, column=0, sticky=tk.W, padx=5, pady=5)
-        ttk.Spinbox(options_frame, from_=1, to=99, textvariable=self.start_index, width=5).grid(row=1, column=1, sticky=tk.W, padx=5, pady=5)
-        
-        # 预览按钮
-        ttk.Button(options_frame, text="预览结果", command=self.preview_process).grid(row=2, column=0, columnspan=3, padx=5, pady=10, sticky=tk.EW)
-        
-        # 执行按钮
-        ttk.Button(options_frame, text="执行处理", command=self.execute_process).grid(row=3, column=0, columnspan=3, padx=5, pady=10, sticky=tk.EW)
-        
-        # 选择操作按钮
+        # 选择和操作按钮
         select_frame = ttk.Frame(options_frame)
-        select_frame.grid(row=4, column=0, columnspan=3, padx=5, pady=5, sticky=tk.EW)
+        select_frame.pack(fill=tk.X, pady=10)
         
-        ttk.Button(select_frame, text="全选", command=self.select_all).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=2)
-        ttk.Button(select_frame, text="取消全选", command=self.deselect_all).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=2)
-        ttk.Button(select_frame, text="反选", command=self.invert_selection).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=2)
+        select_all_btn = ttk.Button(select_frame, text="全选", command=self.select_all)
+        select_all_btn.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=2)
         
-        # 帮助信息
-        help_text = "使用说明:\n" \
-                   "1. 选择Eagle数据文件夹\n" \
-                   "2. 选择输出文件夹\n" \
-                   "3. 加载Eagle数据后选择需要处理的文件夹\n" \
-                   "4. 设置前缀格式和起始索引\n" \
-                   "5. 预览处理效果\n" \
-                   "6. 确认无误后执行处理"
+        deselect_all_btn = ttk.Button(select_frame, text="取消全选", command=self.deselect_all)
+        deselect_all_btn.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=2)
         
-        help_label = ttk.Label(options_frame, text=help_text, justify=tk.LEFT, wraplength=280)
-        help_label.grid(row=5, column=0, columnspan=3, padx=5, pady=10, sticky=tk.NW)
+        invert_btn = ttk.Button(select_frame, text="反选", command=self.invert_selection)
+        invert_btn.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=2)
         
-        # 下方区域 - 日志输出
+        # 起始索引设置
+        index_frame = ttk.Frame(options_frame)
+        index_frame.pack(fill=tk.X, pady=10)
+        
+        ttk.Label(index_frame, text="起始索引:").pack(side=tk.LEFT)
+        
+        index_spinbox = ttk.Spinbox(
+            index_frame, 
+            from_=1, 
+            to=99, 
+            textvariable=self.start_index, 
+            width=5
+        )
+        index_spinbox.pack(side=tk.LEFT, padx=(5, 0))
+        
+        # 前缀模式选择
+        mode_frame = ttk.LabelFrame(options_frame, text="前缀变化方式", padding="10")
+        mode_frame.pack(fill=tk.X, pady=10)
+        
+        ttk.Radiobutton(
+            mode_frame, 
+            text="递增", 
+            value="increment", 
+            variable=self.prefix_mode
+        ).pack(anchor=tk.W, pady=2)
+        
+        ttk.Radiobutton(
+            mode_frame, 
+            text="递减", 
+            value="decrement", 
+            variable=self.prefix_mode
+        ).pack(anchor=tk.W, pady=2)
+        
+        # 预览和执行按钮
+        preview_btn = ttk.Button(options_frame, text="预览重命名", command=self.preview_rename)
+        preview_btn.pack(fill=tk.X, pady=(20, 5))
+        
+        execute_btn = ttk.Button(options_frame, text="执行重命名", command=self.execute_rename)
+        execute_btn.pack(fill=tk.X, pady=5)
+        
+        # 创建操作日志框架（底部）
         log_frame = ttk.LabelFrame(main_frame, text="操作日志", padding="10")
         log_frame.pack(fill=tk.X, padx=5, pady=5)
         
-        log_scroll = ttk.Scrollbar(log_frame)
-        log_scroll.pack(side=tk.RIGHT, fill=tk.Y)
-        
-        self.log_text = tk.Text(log_frame, height=8, yscrollcommand=log_scroll.set, state="disabled")
-        self.log_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        # 添加滚动条
+        log_scroll = ttk.Scrollbar(log_frame, orient="vertical")
+        self.log_text = tk.Text(log_frame, height=8, wrap=tk.WORD, state=tk.DISABLED, yscrollcommand=log_scroll.set)
         log_scroll.config(command=self.log_text.yview)
         
-        # 重定向标准输出到日志文本框
-        self.stdout_redirect = RedirectText(self.log_text)
+        log_scroll.pack(side=tk.RIGHT, fill=tk.Y)
+        self.log_text.pack(fill=tk.BOTH, expand=True)
+        
+        # 重定向标准输出到日志窗口
+        self.redirect = RedirectText(self.log_text)
+        sys.stdout = self.redirect
+        
+        # 设置样式
+        style = ttk.Style()
+        style.configure("TButton", font=("Microsoft YaHei", 10))
+        style.configure("TLabel", font=("Microsoft YaHei", 10))
+        style.configure("TLabelframe.Label", font=("Microsoft YaHei", 10, "bold"))
     
     def browse_eagle_folder(self):
-        """浏览并选择Eagle数据文件夹"""
-        folder_selected = filedialog.askdirectory(title="选择Eagle数据文件夹")
-        if folder_selected:
-            self.eagle_folder.set(folder_selected)
-            print(f"已选择Eagle数据文件夹: {folder_selected}")
+        """浏览并选择Eagle文件夹"""
+        # 默认打开用户文档目录下的Eagle文件夹
+        default_dir = os.path.join(os.path.expanduser("~"), "Documents", "Eagle", "Library")
+        if not os.path.exists(default_dir):
+            default_dir = os.path.expanduser("~")
+            
+        folder_path = filedialog.askdirectory(
+            title="选择Eagle文件夹",
+            initialdir=default_dir
+        )
+        
+        if folder_path:
+            self.eagle_path_var.set(folder_path)
+            print(f"已选择Eagle文件夹: {folder_path}")
     
-    def browse_output_folder(self):
-        """浏览并选择输出文件夹"""
-        folder_selected = filedialog.askdirectory(title="选择输出文件夹")
-        if folder_selected:
-            self.output_folder.set(folder_selected)
-            print(f"已选择输出文件夹: {folder_selected}")
-    
-    def load_eagle_data(self):
-        """加载Eagle数据"""
-        eagle_folder = self.eagle_folder.get()
-        if not eagle_folder or not os.path.isdir(eagle_folder):
-            messagebox.showerror("错误", "请选择有效的Eagle数据文件夹")
+    def load_eagle_files(self):
+        """加载Eagle文件夹中的文件"""
+        eagle_folder = self.eagle_path_var.get().strip()
+        
+        if not eagle_folder:
+            messagebox.showwarning("警告", "请先选择Eagle文件夹!")
+            return
+            
+        if not os.path.isdir(eagle_folder):
+            messagebox.showerror("错误", f"文件夹不存在: {eagle_folder}")
             return
         
-        # 检查是否为有效的Eagle数据文件夹
-        if not os.path.exists(os.path.join(eagle_folder, "metadata.json")):
-            messagebox.showerror("错误", "所选文件夹不是有效的Eagle数据文件夹")
+        # 保存Eagle文件夹路径
+        self.eagle_folder = eagle_folder
+        
+        # 清空文件树和数据
+        self.file_tree.delete(*self.file_tree.get_children())
+        self.eagle_files = []
+        
+        # 检查images文件夹
+        images_folder = os.path.join(eagle_folder, "images")
+        if not os.path.exists(images_folder):
+            messagebox.showerror("错误", f"未找到images文件夹: {images_folder}\n这可能不是一个有效的Eagle库文件夹。")
             return
+        
+        print(f"开始扫描Eagle文件夹: {eagle_folder}")
         
         try:
-            # 读取元数据文件
-            with open(os.path.join(eagle_folder, "metadata.json"), 'r', encoding='utf-8') as f:
-                metadata = json.load(f)
+            # 扫描images文件夹中所有的子文件夹
+            folder_count = 0
+            for folder_name in os.listdir(images_folder):
+                folder_path = os.path.join(images_folder, folder_name)
+                
+                # 只处理文件夹，而且是以.info结尾的
+                if os.path.isdir(folder_path) and folder_name.endswith(".info"):
+                    folder_count += 1
+                    
+                    # 文件ID (去掉.info后缀)
+                    file_id = folder_name[:-5] if folder_name.endswith(".info") else folder_name
+                    
+                    # 查找metadata.json文件
+                    metadata_file = os.path.join(folder_path, "metadata.json")
+                    if os.path.exists(metadata_file):
+                        try:
+                            with open(metadata_file, 'r', encoding='utf-8') as f:
+                                metadata = json.load(f)
+                                
+                                # 获取文件名和类型
+                                file_name = metadata.get("name", "未知")
+                                file_ext = metadata.get("ext", "").lower()
+                                
+                                # 找到对应的实际文件
+                                actual_files = [f for f in os.listdir(folder_path) 
+                                              if os.path.isfile(os.path.join(folder_path, f)) 
+                                              and not f.endswith('.json') 
+                                              and not f.endswith('.png')]
+                                
+                                actual_file = actual_files[0] if actual_files else None
+                                
+                                # 保存文件信息
+                                file_info = {
+                                    "id": file_id,
+                                    "folder": folder_path,
+                                    "metadata_file": metadata_file,
+                                    "name": file_name,
+                                    "type": file_ext,
+                                    "actual_file": actual_file,
+                                    "metadata": metadata
+                                }
+                                
+                                self.eagle_files.append(file_info)
+                                
+                                # 添加到界面
+                                self.file_tree.insert("", "end", values=(
+                                    folder_count,
+                                    file_id,
+                                    file_name,
+                                    file_ext.upper()
+                                ))
+                        except Exception as e:
+                            print(f"处理文件{metadata_file}时发生错误: {str(e)}")
             
-            # 检查是否有文件夹数据
-            if "folders" not in metadata:
-                messagebox.showerror("错误", "未找到Eagle文件夹数据")
-                return
+            print(f"扫描完成，共找到 {folder_count} 个Eagle文件，有效文件 {len(self.eagle_files)} 个")
             
-            # 获取文件夹数据
-            self.folders_data = metadata["folders"]
+            if not self.eagle_files:
+                messagebox.showinfo("提示", "未找到Eagle文件，请确认选择了正确的Eagle库文件夹。")
             
-            # 清空并填充列表框
-            self.folder_listbox.delete(0, tk.END)
-            
-            # 按文件夹名称排序
-            sorted_folders = sorted(self.folders_data, key=lambda x: x.get("name", "").lower())
-            
-            for folder in sorted_folders:
-                folder_name = folder.get("name", "未命名文件夹")
-                folder_id = folder.get("id", "")
-                self.folder_listbox.insert(tk.END, f"{folder_name} (ID: {folder_id})")
-            
-            print(f"已加载 {len(self.folders_data)} 个Eagle文件夹")
-        
         except Exception as e:
-            messagebox.showerror("错误", f"加载Eagle数据时出错: {str(e)}")
+            messagebox.showerror("错误", f"扫描Eagle文件夹时发生错误: {str(e)}")
     
-    def on_folder_select(self, event):
-        """处理文件夹选择事件"""
-        selection = self.folder_listbox.curselection()
-        if selection:
-            self.selected_folders = [self.folders_data[i] for i in selection]
-            print(f"已选择 {len(self.selected_folders)} 个文件夹")
+    def on_file_select(self, event):
+        """处理文件选择事件"""
+        self.selected_files = []
+        for item_id in self.file_tree.selection():
+            item_index = self.file_tree.index(item_id)
+            if 0 <= item_index < len(self.eagle_files):
+                self.selected_files.append(self.eagle_files[item_index])
+        
+        print(f"已选择 {len(self.selected_files)} 个文件")
     
     def select_all(self):
-        """选择所有文件夹"""
-        self.folder_listbox.select_set(0, tk.END)
-        self.on_folder_select(None)
+        """选择所有文件"""
+        self.file_tree.selection_set(self.file_tree.get_children())
+        self.on_file_select(None)
     
     def deselect_all(self):
-        """取消选择所有文件夹"""
-        self.folder_listbox.selection_clear(0, tk.END)
-        self.selected_folders = []
+        """取消选择所有文件"""
+        self.file_tree.selection_remove(self.file_tree.get_children())
+        self.selected_files = []
         print("已取消所有选择")
     
     def invert_selection(self):
-        """反转选择"""
-        selected = set(self.folder_listbox.curselection())
-        all_indices = set(range(len(self.folders_data)))
+        """反选"""
+        all_items = self.file_tree.get_children()
+        selected_items = self.file_tree.selection()
         
-        # 清除当前选择
-        self.folder_listbox.selection_clear(0, tk.END)
+        # 取消当前选择
+        self.file_tree.selection_remove(selected_items)
         
         # 选择未选择的项目
-        for i in all_indices - selected:
-            self.folder_listbox.selection_set(i)
+        for item in all_items:
+            if item not in selected_items:
+                self.file_tree.selection_add(item)
         
-        self.on_folder_select(None)
+        self.on_file_select(None)
     
-    def preview_process(self):
-        """预览处理结果"""
-        if not self.selected_folders:
-            messagebox.showinfo("提示", "请选择要处理的Eagle文件夹")
+    def preview_rename(self):
+        """预览重命名结果"""
+        if not self.selected_files:
+            messagebox.showwarning("警告", "请先选择要重命名的文件!")
             return
         
-        if not self.output_folder.get():
-            messagebox.showinfo("提示", "请选择输出文件夹")
-            return
-        
-        try:
-            eagle_folder = self.eagle_folder.get()
-            output_folder = self.output_folder.get()
-            prefix_format = self.prefix_format.get()
-            start_idx = self.start_index.get()
-            
-            # 生成预览信息
-            preview_info = "处理预览:\n\n"
-            for i, folder in enumerate(self.selected_folders):
-                folder_name = folder.get("name", "未命名文件夹")
-                folder_id = folder.get("id", "")
-                
-                # 构建新的文件夹名称
-                new_prefix = prefix_format.format(start_idx + i)
-                new_folder_name = f"{new_prefix}_{folder_name}"
-                
-                preview_info += f"{folder_name} -> {new_folder_name}\n"
-                
-                # 检查该文件夹下有多少图片
-                folder_path = os.path.join(eagle_folder, "images", folder_id)
-                if os.path.exists(folder_path):
-                    image_files = [f for f in os.listdir(folder_path) if os.path.isfile(os.path.join(folder_path, f)) and not f.endswith('.info')]
-                    preview_info += f"  - 包含 {len(image_files)} 个文件\n"
-                else:
-                    preview_info += "  - 文件夹不存在或为空\n"
-            
-            # 显示预览对话框
-            preview_window = tk.Toplevel(self.root)
-            preview_window.title("处理预览")
-            preview_window.geometry("600x400")
-            
-            # 预览文本框
-            preview_scroll = ttk.Scrollbar(preview_window)
-            preview_scroll.pack(side=tk.RIGHT, fill=tk.Y)
-            
-            preview_text = tk.Text(
-                preview_window,
-                yscrollcommand=preview_scroll.set,
-                font=("Courier New", 10)
-            )
-            preview_text.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
-            preview_scroll.config(command=preview_text.yview)
-            
-            # 添加预览内容
-            preview_text.insert(tk.END, preview_info)
-            
-            # 添加按钮
-            button_frame = ttk.Frame(preview_window)
-            button_frame.pack(fill=tk.X, padx=10, pady=10)
-            
-            ttk.Button(
-                button_frame, 
-                text="关闭", 
-                command=preview_window.destroy
-            ).pack(side=tk.RIGHT, padx=5)
-            
-            ttk.Button(
-                button_frame, 
-                text="执行处理", 
-                command=lambda: [self.execute_process(), preview_window.destroy()]
-            ).pack(side=tk.RIGHT, padx=5)
-            
-            print("已生成处理预览")
-        
-        except Exception as e:
-            messagebox.showerror("错误", f"生成预览时出错: {str(e)}")
-    
-    def execute_process(self):
-        """执行处理操作"""
-        if not self.selected_folders:
-            messagebox.showinfo("提示", "请选择要处理的Eagle文件夹")
-            return
-        
-        if not self.output_folder.get():
-            messagebox.showinfo("提示", "请选择输出文件夹")
-            return
-        
-        try:
-            # 创建一个线程来执行处理操作
-            process_thread = threading.Thread(target=self._process_folders_thread)
-            process_thread.start()
-            
-        except Exception as e:
-            messagebox.showerror("错误", f"执行处理时出错: {str(e)}")
-    
-    def _process_folders_thread(self):
-        """在单独的线程中执行处理操作"""
-        eagle_folder = self.eagle_folder.get()
-        output_folder = self.output_folder.get()
-        prefix_format = self.prefix_format.get()
         start_idx = self.start_index.get()
+        mode = self.prefix_mode.get()
         
-        success_count = 0
-        error_count = 0
+        # 创建预览窗口
+        preview_window = tk.Toplevel(self.root)
+        preview_window.title("重命名预览")
+        preview_window.geometry("800x500")
+        preview_window.minsize(800, 500)
         
-        try:
-            # 确保输出文件夹存在
-            os.makedirs(output_folder, exist_ok=True)
+        # 添加预览表格
+        preview_frame = ttk.Frame(preview_window, padding="10")
+        preview_frame.pack(fill=tk.BOTH, expand=True)
+        
+        preview_columns = ("序号", "原文件名", "新文件名")
+        preview_tree = ttk.Treeview(preview_frame, columns=preview_columns, show="headings")
+        
+        preview_tree.heading("序号", text="序号")
+        preview_tree.heading("原文件名", text="原文件名")
+        preview_tree.heading("新文件名", text="新文件名")
+        
+        preview_tree.column("序号", width=50, anchor="center")
+        preview_tree.column("原文件名", width=350)
+        preview_tree.column("新文件名", width=350)
+        
+        # 添加滚动条
+        preview_scroll = ttk.Scrollbar(preview_frame, orient="vertical", command=preview_tree.yview)
+        preview_tree.configure(yscrollcommand=preview_scroll.set)
+        
+        preview_scroll.pack(side=tk.RIGHT, fill=tk.Y)
+        preview_tree.pack(fill=tk.BOTH, expand=True)
+        
+        # 生成预览数据
+        original_names = []
+        new_names = []
+        
+        for i, file_info in enumerate(self.selected_files):
+            original_name = file_info["name"]
+            original_names.append(original_name)
             
-            # 处理每个选定的文件夹
-            for i, folder in enumerate(self.selected_folders):
-                folder_name = folder.get("name", "未命名文件夹")
-                folder_id = folder.get("id", "")
+            # 提取前缀和后缀
+            match = re.match(r'^(\d+)(.+?)(\d+)$', original_name)
+            if match:
+                prefix, main_part, suffix = match.groups()
                 
-                # 构建新的文件夹名称
-                new_prefix = prefix_format.format(start_idx + i)
-                new_folder_name = f"{new_prefix}_{folder_name}"
+                # 根据模式递增或递减前缀
+                if mode == "increment":
+                    new_prefix = str(min(99, start_idx + i)).zfill(len(prefix))
+                else:  # decrement
+                    new_prefix = str(max(1, start_idx - i)).zfill(len(prefix))
                 
-                # 创建输出子文件夹
-                new_folder_path = os.path.join(output_folder, new_folder_name)
-                os.makedirs(new_folder_path, exist_ok=True)
+                new_name = f"{new_prefix}{main_part}{suffix}"
+            else:
+                # 如果不符合预期格式，则添加新前缀
+                if mode == "increment":
+                    new_prefix = str(min(99, start_idx + i)).zfill(2)
+                else:  # decrement
+                    new_prefix = str(max(1, start_idx - i)).zfill(2)
                 
-                # 复制该文件夹下的所有图片
-                folder_path = os.path.join(eagle_folder, "images", folder_id)
-                
-                if os.path.exists(folder_path):
-                    # 获取所有文件（排除.info文件）
-                    image_files = [f for f in os.listdir(folder_path) if os.path.isfile(os.path.join(folder_path, f)) and not f.endswith('.info')]
-                    
-                    # 复制每个文件
-                    for j, filename in enumerate(image_files):
-                        src_file = os.path.join(folder_path, filename)
-                        
-                        # 获取文件扩展名
-                        _, ext = os.path.splitext(filename)
-                        
-                        # 创建新的文件名
-                        new_filename = f"{j+1:03d}{ext}"
-                        dst_file = os.path.join(new_folder_path, new_filename)
-                        
-                        try:
-                            shutil.copy2(src_file, dst_file)
-                            print(f"已复制: {filename} -> {new_folder_name}/{new_filename}")
-                        except Exception as e:
-                            print(f"复制文件失败: {filename} -> {new_filename}")
-                            print(f"错误: {str(e)}")
-                            error_count += 1
-                    
-                    print(f"已处理文件夹: {folder_name} -> {new_folder_name} (共 {len(image_files)} 个文件)")
-                    success_count += 1
-                else:
-                    print(f"文件夹不存在或为空: {folder_name}")
-                    error_count += 1
+                new_name = f"{new_prefix}_{original_name}"
             
-            # 显示完成消息
-            self.root.after(0, lambda: messagebox.showinfo(
-                "完成", 
-                f"处理操作完成\n成功: {success_count} 个文件夹\n失败: {error_count} 个文件夹"
-            ))
+            new_names.append(new_name)
             
-        except Exception as e:
-            self.root.after(0, lambda: messagebox.showerror("错误", f"处理过程中出错: {str(e)}"))
+            # 添加到预览表格
+            preview_tree.insert("", "end", values=(i+1, original_name, new_name))
+        
+        # 添加按钮
+        button_frame = ttk.Frame(preview_window, padding="10")
+        button_frame.pack(fill=tk.X)
+        
+        close_btn = ttk.Button(button_frame, text="关闭", command=preview_window.destroy)
+        close_btn.pack(side=tk.RIGHT, padx=5)
+        
+        execute_btn = ttk.Button(
+            button_frame, 
+            text="执行重命名", 
+            command=lambda: [self.execute_rename_with_data(original_names, new_names), preview_window.destroy()]
+        )
+        execute_btn.pack(side=tk.RIGHT, padx=5)
+    
+    def execute_rename(self):
+        """执行重命名"""
+        if not self.selected_files:
+            messagebox.showwarning("警告", "请先选择要重命名的文件!")
+            return
+            
+        # 询问确认
+        if not messagebox.askyesno("确认", "确定要执行重命名操作吗？此操作不可撤销！"):
+            return
+            
+        start_idx = self.start_index.get()
+        mode = self.prefix_mode.get()
+        
+        # 生成重命名数据
+        original_names = []
+        new_names = []
+        
+        for i, file_info in enumerate(self.selected_files):
+            original_name = file_info["name"]
+            original_names.append(original_name)
+            
+            # 提取前缀和后缀
+            match = re.match(r'^(\d+)(.+?)(\d+)$', original_name)
+            if match:
+                prefix, main_part, suffix = match.groups()
+                
+                # 根据模式递增或递减前缀
+                if mode == "increment":
+                    new_prefix = str(min(99, start_idx + i)).zfill(len(prefix))
+                else:  # decrement
+                    new_prefix = str(max(1, start_idx - i)).zfill(len(prefix))
+                
+                new_name = f"{new_prefix}{main_part}{suffix}"
+            else:
+                # 如果不符合预期格式，则添加新前缀
+                if mode == "increment":
+                    new_prefix = str(min(99, start_idx + i)).zfill(2)
+                else:  # decrement
+                    new_prefix = str(max(1, start_idx - i)).zfill(2)
+                
+                new_name = f"{new_prefix}_{original_name}"
+            
+            new_names.append(new_name)
+        
+        # 执行重命名
+        self.execute_rename_with_data(original_names, new_names)
+    
+    def execute_rename_with_data(self, original_names, new_names):
+        """使用预生成的数据执行重命名"""
+        if len(original_names) != len(new_names) or len(original_names) != len(self.selected_files):
+            messagebox.showerror("错误", "重命名数据不匹配，操作取消。")
+            return
+        
+        # 创建进度条
+        progress_window = tk.Toplevel(self.root)
+        progress_window.title("重命名进行中")
+        progress_window.geometry("400x100")
+        progress_window.resizable(False, False)
+        progress_window.transient(self.root)
+        
+        progress_frame = ttk.Frame(progress_window, padding="20")
+        progress_frame.pack(fill=tk.BOTH, expand=True)
+        
+        ttk.Label(progress_frame, text="正在重命名文件，请稍候...").pack()
+        
+        progress_bar = ttk.Progressbar(progress_frame, orient="horizontal", length=350, mode="determinate")
+        progress_bar.pack(pady=10)
+        
+        # 在单独的线程中执行重命名
+        def rename_thread():
+            success_count = 0
+            error_count = 0
+            
+            try:
+                total = len(self.selected_files)
+                
+                for i, (file_info, new_name) in enumerate(zip(self.selected_files, new_names)):
+                    try:
+                        # 更新进度条
+                        progress = int((i / total) * 100)
+                        progress_bar["value"] = progress
+                        progress_window.update()
+                        
+                        # 获取文件信息
+                        folder_path = file_info["folder"]
+                        metadata_file = file_info["metadata_file"]
+                        actual_file = file_info["actual_file"]
+                        old_name = file_info["name"]
+                        metadata = file_info["metadata"]
+                        
+                        # 1. 修改metadata.json中的name字段
+                        if os.path.exists(metadata_file):
+                            metadata["name"] = new_name
+                            
+                            # 备份原文件
+                            backup_file = f"{metadata_file}.bak"
+                            if os.path.exists(backup_file):
+                                os.remove(backup_file)
+                            shutil.copy2(metadata_file, backup_file)
+                            
+                            # 写入新内容
+                            with open(metadata_file, 'w', encoding='utf-8') as f:
+                                json.dump(metadata, f)
+                        
+                        # 2. 如果有实际文件，重命名实际文件
+                        if actual_file and os.path.exists(os.path.join(folder_path, actual_file)):
+                            # 获取文件扩展名
+                            _, ext = os.path.splitext(actual_file)
+                            
+                            # 创建新文件名
+                            new_actual_file = f"{new_name}{ext}"
+                            
+                            # 重命名文件
+                            os.rename(
+                                os.path.join(folder_path, actual_file),
+                                os.path.join(folder_path, new_actual_file)
+                            )
+                            
+                            # 更新文件信息
+                            file_info["actual_file"] = new_actual_file
+                        
+                        # 更新文件信息
+                        file_info["name"] = new_name
+                        
+                        print(f"重命名成功: {old_name} -> {new_name}")
+                        success_count += 1
+                        
+                    except Exception as e:
+                        print(f"重命名失败: {file_info['name']} -> {new_name}")
+                        print(f"错误: {str(e)}")
+                        error_count += 1
+                
+                # 更新UI
+                progress_bar["value"] = 100
+                progress_window.update()
+                
+                # 重新加载文件列表
+                self.root.after(500, self.refresh_file_list)
+                
+                # 显示完成消息
+                messagebox.showinfo(
+                    "完成", 
+                    f"重命名操作完成\n成功: {success_count} 个文件\n失败: {error_count} 个文件"
+                )
+                
+                # 关闭进度窗口
+                progress_window.destroy()
+                
+            except Exception as e:
+                messagebox.showerror("错误", f"重命名过程中发生错误: {str(e)}")
+                progress_window.destroy()
+        
+        # 启动线程
+        threading.Thread(target=rename_thread).start()
+    
+    def refresh_file_list(self):
+        """刷新文件列表"""
+        if self.eagle_folder:
+            # 保存当前选择
+            selected_ids = [file_info["id"] for file_info in self.selected_files]
+            
+            # 重新加载文件
+            self.load_eagle_files()
+            
+            # 恢复选择
+            children = self.file_tree.get_children()
+            for i, item_id in enumerate(children):
+                if i < len(self.eagle_files) and self.eagle_files[i]["id"] in selected_ids:
+                    self.file_tree.selection_add(item_id)
+            
+            # 更新选择状态
+            self.on_file_select(None)
 
 def main():
     root = tk.Tk()
-    root.title("Eagle文件重命名工具")
-    root.geometry("900x600")
-    
-    # 设置窗口图标
-    try:
-        if os.path.exists("icon.ico"):
-            root.iconbitmap("icon.ico")
-    except Exception:
-        pass
-    
     app = EagleRenamerApp(root)
     root.mainloop()
 
