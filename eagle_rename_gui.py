@@ -38,8 +38,8 @@ class EagleRenamerApp:
             self.should_destroy_root = False
             
         self.root.title("Eagle文件重命名")
-        self.root.geometry("900x700")
-        self.root.minsize(900, 700)
+        self.root.geometry("1300x700")
+        self.root.minsize(1300, 700)
         
         # 设置窗口图标
         try:
@@ -124,9 +124,9 @@ class EagleRenamerApp:
         self.file_tree.heading("类型", text="类型", command=lambda: self.sort_tree_column("类型"))
         
         self.file_tree.column("序号", width=50, anchor="center")
-        self.file_tree.column("文件ID", width=150)
-        self.file_tree.column("文件名", width=400)
-        self.file_tree.column("类型", width=80, anchor="center")
+        self.file_tree.column("文件ID", width=180)
+        self.file_tree.column("文件名", width=500)
+        self.file_tree.column("类型", width=100, anchor="center")
         
         # 添加滚动条
         tree_scroll = ttk.Scrollbar(files_frame, orient="vertical", command=self.file_tree.yview)
@@ -139,7 +139,7 @@ class EagleRenamerApp:
         self.file_tree.bind("<<TreeviewSelect>>", self.on_file_select)
         
         # 右侧 - 操作选项
-        options_frame = ttk.LabelFrame(middle_frame, text="重命名选项", padding="10", width=300)
+        options_frame = ttk.LabelFrame(middle_frame, text="重命名选项", padding="10", width=380)
         options_frame.pack(side=tk.RIGHT, fill=tk.Y, padx=(5, 0))
         options_frame.pack_propagate(False)  # 防止框架被内容压缩
         
@@ -162,7 +162,7 @@ class EagleRenamerApp:
             width=5,
             format="%02.0f"  # 格式化为两位数
         )
-        index_spinbox.pack(side=tk.LEFT, padx=(0, 5))
+        index_spinbox.pack(side=tk.LEFT, padx=(0, 20))
         
         # 添加自动选择按钮
         auto_select_btn = ttk.Button(
@@ -170,13 +170,13 @@ class EagleRenamerApp:
             text="自动选择", 
             command=self.auto_select_from_index
         )
-        auto_select_btn.pack(side=tk.LEFT, padx=(5, 0))
+        auto_select_btn.pack(side=tk.LEFT)
         
         # 前缀模式选择
         mode_row = ttk.Frame(index_frame)
-        mode_row.pack(fill=tk.X, pady=5)
+        mode_row.pack(fill=tk.X, pady=10)
         
-        ttk.Label(mode_row, text="前缀变化方式:").pack(side=tk.LEFT, padx=(0, 5))
+        ttk.Label(mode_row, text="前缀变化方式:").pack(side=tk.LEFT, padx=(0, 10))
         
         self.prefix_mode = tk.StringVar(value="increment")
         ttk.Radiobutton(
@@ -184,7 +184,7 @@ class EagleRenamerApp:
             text="递增", 
             value="increment", 
             variable=self.prefix_mode
-        ).pack(side=tk.LEFT, padx=(0, 10))
+        ).pack(side=tk.LEFT, padx=(5, 30))
         
         ttk.Radiobutton(
             mode_row, 
@@ -470,8 +470,8 @@ class EagleRenamerApp:
         # 创建预览窗口
         preview_window = tk.Toplevel(self.root)
         preview_window.title("重命名预览")
-        preview_window.geometry("800x500")
-        preview_window.minsize(800, 500)
+        preview_window.geometry("900x500")
+        preview_window.minsize(900, 500)
         
         # 添加预览表格
         preview_frame = ttk.Frame(preview_window, padding="10")
